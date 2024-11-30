@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Annotation and Generation</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f7f9fc;
+            font-family: 'Helvetica Neue', sans-serif;
+        }
+        .form-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 2rem;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        h1.display-4 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #333;
+        }
+        .btn-custom {
+            background-color: #000;
+            color: #fff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 50px;
+            transition: background-color 0.3s ease;
+        }
+        .btn-custom:hover {
+            background-color: #333;
+        }
+        .form-group label {
+            font-weight: 600;
+            color: #555;
+        }
+        #annotationCanvas {
+            position: absolute;
+            border: 1px solid rgba(255, 0, 0, 0.7);
+            display: none;
+            z-index: 10; 
+        }
+
+        .generated-image {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-top: 1rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container my-5">
+    <div class="text-center mb-4">
+        <h1 class="display-4">ArtOa AI</h1>
+    </div>
+    
+    <div class="form-container">
+        <form id="imageForm">
+            <div class="form-group">
+                <label for="background_image">Upload Background Image:</label>
+                <input type="file" id="background_image" name="background_image" class="form-control-file" accept="image/*" required>
+                <div class="position-relative">
+                    <img id="uploadedImage" style="display:none; margin-top:10px; max-width: 100%;" />
+                    <canvas id="annotationCanvas"></canvas>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="prompt">Prompt:</label>
+                <input type="text" id="prompt" name="prompt" class="form-control" placeholder="Enter your prompt here" required>
+            </div>
+            <button type="submit" class="btn btn-custom btn-block">Generate</button>
+        </form>
+    </div>
+    
+    <div id="result" class="text-center"></div>
+</div>
+
+<script>
+    const uploadedImage = document.getElementById('uploadedImage');
+    const annotationCanvas = document.getElementById('annotationCanvas');
+    const ctx = annotationCanvas.getContext('2d');
+    let startX, startY, endX, endY, isDrawing = false;
+
+    document.getElementById('background_image').addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                uploadedImage.src = e.target.result;
+                uploadedImage.style.display = 'block';
+                uploadedImage.onload = () => {
+                    annotationCanvas.width = uploadedImage.width;
+                    annotationCanvas.height = uploadedImage.height;
+                    annotationCanvas.style.display = 'block';
+                    annotationCanvas.style.position = 'absolute';
+                    annotationCanvas.style.left = `${uploadedImage.offsetLeft}px`;
+                    annotationCanvas.style.top = `${uploadedImage.offsetTop}px`;
+                };
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    annotationCanvas.addEventListener('mousedown', (e) => {
+        const rect = annotationCanvas.getBoundingClientRect();
+        startX = e.clientX - rect.left;
+        startY = e.clientY - rect.top;
+        isDrawing = true;
+    });
+
+    annotationCanvas.addEventListener('mousemove', (e) => {
+        if (isDrawing) {
+            const rect = annotationCanvas.getBoundingClientRect();
+            endX = e.clientX - rect.left;
+            endY = e.clientY - rect.top;
+            ctx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(startX, startY, endX - startX, endY - startY);
+        }
+    });
+
+    annotationCanvas.addEventListener('mouseup', () => {
+        isDrawing = false;
+    });
+
+
+    document.getElementById('imageForm').addEventListener('submit', async function(event) {
+        event.preventDefault();
+
+        const formData = new FormData();
+        const fileInput = document.getElementById('background_image');
+        const prompt = document.getElementById('prompt').value;
+        
+        const selection = {
+            startX: Math.round(startX),
+            startY: Math.round(startY),
+            width: Math.round(endX - startX),
+            height: Math.round(endY - startY)
+        };
+
+        formData.append('background_image', fileInput.files[0]);
+        formData.append('prompt', prompt);
+        formData.append('selection', JSON.stringify(selection));
+        
+        try {
+            const response = await fetch('http://127.0.0.1:8000/generate/', {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await response.json();
+            const resultDiv = document.getElementById('result');
+
+            if (response.ok) {
+                resultDiv.innerHTML = `
+                    <div class="mt-4">
+                        <img src="generated_images/${data.hash}.png" alt="Generated Image" class="generated-image">
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger mt-4" role="alert">
+                        <h4 class="alert-heading">Error</h4>
+                        <p>${data.error}</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            document.getElementById('result').innerHTML = `
+                <div class="alert alert-danger mt-4" role="alert">
+                    <h4 class="alert-heading">Error</h4>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        }
+    });
+
+</script>
+
+<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.2/dist/umd/popper.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
+</body>
+</html>
